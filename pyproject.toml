@@ -1,0 +1,12 @@
+[project]
+name = "momo-tune"
+version = "0.1.0"
+description = "MomoTune 日系二次元风格网易云 / 酷狗点歌 GsCore 插件"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "pytakumi>=0.1.0",
+]
+
+[tool.gsuid]
+plugin_name = "MomoTune"
