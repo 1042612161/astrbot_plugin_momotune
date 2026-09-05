@@ -142,20 +142,23 @@ def _merge_detail(song: Song, detail: Song | None) -> Song:
     )
 
 
-async def _play_song(bot: Bot, ev: Event, song: Song, source: BaseSource) -> None:
+async def _play_song(bot: Bot, ev: Event, song: Song, source: BaseSource) -> tuple[bool, str]:
     try:
         play_url = await source.play_url(song)
     except SourceError as exc:
-        await bot.send(str(exc))
-        return
+        msg = str(exc)
+        await bot.send(msg)
+        return False, msg
     except httpx.HTTPError as exc:
         logger.warning(f"[MomoTune] {source.label}获取播放链接失败: {exc}")
-        await bot.send(f"{source.label}暂时无法获取播放链接，请稍后再试。")
-        return
+        msg = f"{source.label}暂时无法获取播放链接，请稍后再试。"
+        await bot.send(msg)
+        return False, msg
 
     if not play_url:
-        await bot.send("这首歌暂时没有可用的播放链接（可能受版权限制），换一首试试吧。")
-        return
+        msg = "这首歌暂时没有可用的播放链接（可能受版权限制），换一首试试吧。"
+        await bot.send(msg)
+        return False, msg
 
     if song.name == "未知曲目" or song.pic_url is None:
         try:
@@ -177,9 +180,11 @@ async def _play_song(bot: Bot, ev: Event, song: Song, source: BaseSource) -> Non
         audio = await download(play_url)
     except (SourceError, httpx.HTTPError) as exc:
         logger.warning(f"[MomoTune] 下载音频失败 {song.song_id}: {exc}")
-        await bot.send("下载音频失败，请稍后再试。")
-        return
+        msg = "下载音频失败，请稍后再试。"
+        await bot.send(msg)
+        return False, msg
     await bot.send(MessageSegment.record(audio))
+    return True, f"《{song.name}》- {song.artist}"
 
 
 async def _handle_song_request(bot: Bot, ev: Event, source_name: MusicSource) -> None:
@@ -241,13 +246,6 @@ KUGOU_COMMANDS = ("酷狗点歌", "酷狗唱歌", "酷狗来一首")
     NCM_COMMANDS,
     block=True,
     prefix=False,
-    to_ai="""搜索网易云音乐并播放歌曲。用户说点歌、唱歌、来一首时调用。
-
-Args:
-    text: 歌名、歌手名或网易云歌曲 ID；例如“晴天”或“点歌 347230”。
-""",
-    covers=["网易云点歌", "网易云音乐搜索", "歌曲播放"],
-    aliases=["音乐·点歌", "音乐·搜索网易云歌曲"],
 )
 async def ncm_song(bot: Bot, ev: Event) -> None:
     await _handle_song_request(bot, ev, NCM)
@@ -257,13 +255,6 @@ async def ncm_song(bot: Bot, ev: Event) -> None:
     KUGOU_COMMANDS,
     block=True,
     prefix=False,
-    to_ai="""搜索酷狗音乐并播放歌曲。用户明确要求酷狗歌曲时调用。
-
-Args:
-    text: 歌名或歌手名，例如“酷狗点歌 花海”。
-""",
-    covers=["酷狗点歌", "酷狗音乐搜索", "歌曲播放"],
-    aliases=["音乐·点歌酷狗", "音乐·搜索酷狗歌曲"],
 )
 async def kugou_song(bot: Bot, ev: Event) -> None:
     await _handle_song_request(bot, ev, KUGOU)
@@ -288,3 +279,96 @@ async def pick_song(bot: Bot, ev: Event) -> None:
 
 
 logger.info("[MomoTune] 网易云 / 酷狗点歌触发器已注册")
+
+
+# ─── AI Core 工具集成 ──────────────────────────────────────────────────────────
+try:
+    from pydantic_ai import RunContext
+    from gsuid_core.ai_core.models import ToolContext
+    from gsuid_core.ai_core.register import ai_tools
+
+    @ai_tools(
+        category="common",
+        capability_domain="音乐播放",
+        covers=[
+            "网易云音乐点歌与歌曲播放",
+            "酷狗音乐点歌与歌曲播放",
+            "按歌名或歌手播放歌曲音频与卡片",
+            "根据用户需求点播音乐",
+        ],
+        aliases=[
+            "音乐·点歌",
+            "音乐·播放歌曲",
+            "音乐·网易云放歌",
+            "音乐·酷狗放歌",
+        ],
+        context_tags=["音乐", "点歌", "娱乐"],
+    )
+    async def play_music(
+        ctx: RunContext[ToolContext],
+        song_name: str,
+        artist: str = "",
+        source: str = "ncm",
+    ) -> str:
+        """搜索并直接播放指定歌曲。调用本工具后，机器人会直接将歌曲卡片与音频语音发送到当前聊天中。
+当用户要求点歌、放歌、听歌、来一首歌、或希望播放某位歌手的特定歌曲时调用。
+
+Args:
+    song_name: 歌曲名称或关键词，例如“晴天”、“海阔天空”。若已知网易云歌曲ID也可直接填入数字ID（如“347230”）。
+    artist: 可选，歌手名称，例如“周杰伦”、“陈奕迅”，用于更精准命中。
+    source: 音乐平台源，"ncm"（网易云音乐，默认）或 "kugou"（酷狗音乐）。
+
+Returns:
+    播放状态说明。若成功，卡片与音频已直接发送给用户；AI 无需再重复发送音频，可直接自然回复用户。
+"""
+        bot = ctx.deps.bot
+        ev = ctx.deps.ev
+        if bot is None or ev is None:
+            return "错误：当前会话上下文缺失，无法发送音乐。"
+
+        src_name = KUGOU if source.lower() in ("kugou", "kg", "酷狗") else NCM
+        settings, sources = _REGISTRY.snapshot()
+        source_obj = sources[src_name]
+
+        clean_name = song_name.strip()
+        if not clean_name:
+            return "错误：未指定歌名。"
+
+        # 1. 网易云纯数字 ID 直接播放
+        if src_name == NCM and clean_name.isdigit():
+            ok, info = await _play_song(bot, ev, Song(source=NCM, song_id=clean_name), source_obj)
+            if ok:
+                return f"已成功为用户播放网易云歌曲（ID: {clean_name}）。歌曲卡片与音频已发送到聊天中。"
+            return f"播放失败：{info}"
+
+        # 2. 构造搜索关键词并检索
+        query = f"{artist.strip()} {clean_name}".strip() if artist.strip() and artist.strip() not in clean_name else clean_name
+        try:
+            results = await source_obj.search(query, settings.search_limit)
+        except SourceError as exc:
+            return f"搜索失败：{exc}"
+        except httpx.HTTPError as exc:
+            logger.warning(f"[MomoTune] {source_obj.label}搜索失败: {exc}")
+            return f"搜索失败：连接{source_obj.label}服务超时或异常，请稍后重试。"
+
+        if not results:
+            return f"在{source_obj.label}未找到「{query}」相关的歌曲。建议更换歌名或尝试另一个平台（如 kugou）。"
+
+        # 3. 挑选最佳匹配
+        best_song = results[0]
+        if artist.strip():
+            art_lower = artist.strip().lower()
+            for s in results:
+                if art_lower in s.artist.lower():
+                    best_song = s
+                    break
+
+        # 4. 执行播放并发送
+        ok, info = await _play_song(bot, ev, best_song, source_obj)
+        if ok:
+            return f"已成功为用户播放歌曲：《{best_song.name}》- {best_song.artist}（来源：{source_obj.label}）。歌曲卡片与音频语音已直接发送给用户，AI 可以在对话中告知用户歌曲已送达。"
+        return f"找到歌曲《{best_song.name}》- {best_song.artist}，但在播放时失败：{info}"
+
+    logger.info("[MomoTune] MomoTune AI 音乐播放工具已注册")
+except ImportError as e:
+    logger.warning(f"[MomoTune] 未能加载 AI Core 模块，跳过 AI 工具注册: {e}")
