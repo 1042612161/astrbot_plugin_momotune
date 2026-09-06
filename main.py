@@ -278,6 +278,3 @@ class MomoTunePlugin(Star):
                 selected,
             )
         await self._play(event, selected)
-        yield event.plain_result(
-            f"已尝试播放《{selected.name}》- {selected.artist}。"
-        )
