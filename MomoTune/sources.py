@@ -9,7 +9,6 @@ import httpx
 from .models import Song, SourceError
 
 HTTP_TIMEOUT = 15.0
-DOWNLOAD_MAX_BYTES = 15 * 1024 * 1024
 
 
 def _text(value: object, fallback: str = "") -> str:
@@ -202,22 +201,3 @@ class NcmClient:
         if _integer(rows[0].get("code")) not in (None, 200):
             return None
         return _text(rows[0].get("url")) or None
-
-
-async def download_audio(url: str, proxy: str) -> bytes:
-    """下载音频并执行 15 MB 上限，避免异常响应耗尽内存。"""
-
-    async with httpx.AsyncClient(
-        timeout=HTTP_TIMEOUT,
-        follow_redirects=True,
-        proxy=proxy.strip() or None,
-    ) as client:
-        async with client.stream("GET", url) as response:
-            if response.status_code >= 400:
-                raise SourceError(f"音频下载失败（HTTP {response.status_code}）。")
-            data = bytearray()
-            async for chunk in response.aiter_bytes():
-                data.extend(chunk)
-                if len(data) > DOWNLOAD_MAX_BYTES:
-                    raise SourceError("音频文件超过 15 MB 大小限制。")
-            return bytes(data)

@@ -2,21 +2,20 @@
 
 from __future__ import annotations
 
-import base64
 import re
 
 import httpx
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
-from astrbot.core.message.components import Image, Record
+from astrbot.core.message.components import Image
 
 from .MomoTune import (
     NcmClient,
+    RendererManager,
     SelectionStore,
     Song,
     SourceError,
-    download_audio,
     render_card,
 )
 
@@ -34,6 +33,14 @@ class MomoTunePlugin(Star):
         super().__init__(context)
         self.config = config if config is not None else {}
         self.selections = SelectionStore(ttl_seconds=self._selection_ttl_seconds())
+        self.renderer = RendererManager()
+
+    async def initialize(self) -> None:
+        self.renderer.initialize()
+
+    async def terminate(self) -> None:
+        await self.renderer.close()
+        await super().terminate()
 
     def _config(self, key: str, default: object) -> object:
         value = self.config.get(key, default)
@@ -124,18 +131,47 @@ class MomoTunePlugin(Star):
                 "正在播放",
                 "网易云 · MomoTune 为你选中的旋律",
                 self._proxy(),
+                self.renderer,
             )
             await event.send(event.chain_result([Image.fromBytes(card)]))
         except (OSError, RuntimeError, httpx.HTTPError) as exc:
             logger.warning(f"[MomoTune] 渲染歌曲卡片失败 {song.song_id}: {exc}")
 
         try:
-            audio = await download_audio(play_url, self._proxy())
-            encoded = base64.b64encode(audio).decode("ascii")
-            await event.send(event.chain_result([Record.fromBase64(encoded)]))
-        except (SourceError, httpx.HTTPError, OSError) as exc:
-            logger.warning(f"[MomoTune] 下载音频失败 {song.song_id}: {exc}")
-            await event.send(event.plain_result("下载音频失败，请稍后再试。"))
+            await self._send_audio_url(event, play_url)
+        except Exception as exc:
+            logger.warning(f"[MomoTune] 音频发送失败 {song.song_id}: {exc}")
+            await event.send(event.plain_result("音频发送失败，请稍后再试。"))
+
+    @staticmethod
+    async def _send_audio_url(event: AstrMessageEvent, url: str) -> None:
+        """通过 aiocqhttp 的原始 OneBot API 发送 URL，避免 AstrBot WAV 转换。"""
+
+        bot = getattr(event, "bot", None)
+        if bot is None or not hasattr(bot, "call_action"):
+            raise RuntimeError("当前事件不是 aiocqhttp OneBot 事件")
+        group_id = str(event.get_group_id() or "").strip()
+        self_id = str(event.get_self_id() or "").strip()
+        routing = {"self_id": int(self_id)} if self_id.isdigit() else {}
+        if group_id:
+            if not group_id.isdigit():
+                raise RuntimeError("无效的群号")
+            await bot.call_action(
+                "send_group_msg",
+                group_id=int(group_id),
+                message=[{"type": "record", "data": {"file": url}}],
+                **routing,
+            )
+            return
+        user_id = str(event.get_sender_id() or "").strip()
+        if not user_id.isdigit():
+            raise RuntimeError("无效的用户号")
+        await bot.call_action(
+            "send_private_msg",
+            user_id=int(user_id),
+            message=[{"type": "record", "data": {"file": url}}],
+            **routing,
+        )
 
     async def _search(self, keyword: str) -> list[Song]:
         return await self._source().search(keyword, self._search_limit())
@@ -172,6 +208,7 @@ class MomoTunePlugin(Star):
                 "网易云点歌候选",
                 f"回复数字 1～{len(songs)} 播放对应曲目 · 选择在 {ttl_seconds} 秒内有效",
                 self._proxy(),
+                self.renderer,
             )
         except (OSError, RuntimeError, httpx.HTTPError) as exc:
             logger.warning(f"[MomoTune] 渲染搜索结果失败: {exc}")

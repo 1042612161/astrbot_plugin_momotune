@@ -1,6 +1,6 @@
 # MomoTune（AstrBot 网易云点歌）
 
-这是 [MomoTune](https://github.com/MimoKit/MomoTune) 的 AstrBot 适配版，保留原有网易云搜索、候选卡片、数字选歌、歌曲 ID 直达、歌曲卡片和语音发送流程。酷狗源已移除；本插件不会请求或展示歌词接口。
+这是 [MomoTune](https://github.com/MimoKit/MomoTune) 的 AstrBot 适配版，保留原有网易云搜索、候选卡片、数字选歌、歌曲 ID 直达、歌曲卡片和语音发送流程。酷狗源已移除；本插件不会请求或展示歌词接口，仅支持 AstrBot 的 aiocqhttp/OneBot v11 适配器。
 
 ## 使用
 
@@ -8,7 +8,7 @@
 - 搜索结果超过一首时回复 `1`～`10` 选择，选择状态按会话和用户隔离；默认 60 秒过期，可配置为 30～300 秒。
 - `点歌 421423808`：按网易云歌曲 ID 直接播放。
 
-卡片模板、字体和配色沿用 MomoTune，渲染统一使用 [pytakumi](https://github.com/KimigaiiWuyi/pytakumi)；封面会先转为 Data URI，避免发送时外链失效。
+卡片模板、字体和配色沿用 MomoTune，渲染统一使用 [pytakumi](https://github.com/KimigaiiWuyi/pytakumi)；插件启动时创建并注册字体，后续渲染复用同一个 Renderer，卸载时释放 Renderer 引用。封面会先转为 Data URI，避免发送时外链失效。音频不下载、不转 WAV、不做 Base64，而是通过 OneBot 原始 `record.file` URL 直接发送。
 
 ## 配置
 
@@ -17,7 +17,7 @@ AstrBot WebUI 会从 `_conf_schema.json` 生成配置。`ncm_api_base` 提供两
 1. `https://api.ames.cc.cd`：MomoTune 原有兼容接口（`/cloudsearch`、`/song/detail`、`/song/url/v1`）。
 2. `https://api.qijieya.cn/meting/`：MetingAPI，固定 `server=netease`，按 Meting 参数调用 `type=search`、`type=url`、`type=pic`。搜索结果中的 `url` 解析出歌曲 ID，并缓存 `name`、`artist`、`pic` 等详情；直达 ID 且缓存不存在时再次使用 `type=search` 按 ID 查询，绝不调用 `type=song` 或 `type=lrc`。
 
-`proxy` 用于 API 搜索、详情、封面和音频下载，例如 `http://127.0.0.1:7890`，留空直连。`ncm_cookie` 仅发送给 MomoTune 兼容接口。
+`proxy` 用于 API 搜索、详情和封面，例如 `http://127.0.0.1:7890`，留空直连。音频由 NapCat 根据播放 URL 获取，因此代理不会参与音频下载。`ncm_cookie` 仅发送给 MomoTune 兼容接口。
 
 `selection_ttl_seconds` 控制搜索候选等待数字回复的有效期，默认 `60` 秒，允许范围为 `30`～`300` 秒；代码也会执行边界限制，超出范围的值会自动收敛到最近边界。
 
@@ -36,7 +36,7 @@ astrbot_plugin_momotune/
 ├── main.py                    # AstrBot 命令、事件和消息发送
 ├── MomoTune/
 │   ├── models.py              # 统一歌曲模型与业务异常
-│   ├── sources.py             # 两种网易云 API 和音频下载
+│   ├── sources.py             # 两种网易云 API 和播放链接
 │   ├── renderer.py            # pytakumi 卡片渲染
 │   ├── selection.py           # 用户候选与可配置 TTL
 │   └── assets/

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 from html import escape
+import inspect
 from pathlib import Path
 
 import httpx
@@ -12,8 +14,9 @@ import httpx
 from .models import Song
 
 try:
-    from pytakumi import html_to_pic
+    from pytakumi import Renderer, html_to_pic
 except ImportError:  # pragma: no cover - AstrBot 按 requirements.txt 安装依赖
+    Renderer = None
     html_to_pic = None
 
 ASSETS = Path(__file__).resolve().parent / "assets"
@@ -53,6 +56,59 @@ async def _cover_data_uri(client: httpx.AsyncClient, url: str | None) -> str:
     return f"data:{content_type};base64,{encoded}"
 
 
+class RendererManager:
+    """管理插件级 pytakumi Renderer，并串行化原生渲染调用。"""
+
+    def __init__(self) -> None:
+        self._renderer = None
+        self._lock = asyncio.Lock()
+        self._closed = False
+
+    def initialize(self) -> None:
+        """创建 Renderer 并只注册一次插件字体。"""
+
+        if self._closed:
+            raise RuntimeError("pytakumi Renderer 已关闭")
+        if self._renderer is not None:
+            return
+        if Renderer is None or html_to_pic is None:
+            raise RuntimeError("未安装 pytakumi，请安装 requirements.txt")
+        self._renderer = Renderer()
+        if FONT.is_file():
+            self._renderer.register_font(FONT.read_bytes(), name=FONT_NAME)
+
+    async def render(self, html: str) -> bytes:
+        """使用同一个 Renderer 输出 PNG，避免并发访问原生对象。"""
+
+        async with self._lock:
+            self.initialize()
+            return await asyncio.to_thread(
+                html_to_pic,
+                html,
+                width=680,
+                renderer=self._renderer,
+                font_families=[FONT_NAME],
+                lang="zh",
+            )
+
+    async def close(self) -> None:
+        """关闭 Renderer（若版本提供接口），并释放原生对象引用。"""
+
+        async with self._lock:
+            renderer = self._renderer
+            self._renderer = None
+            self._closed = True
+            if renderer is not None:
+                close = getattr(renderer, "close", None)
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+                del renderer
+            # pytakumi 0.1.x 没有公开 close()，通过释放最后引用交给原生对象析构。
+            gc.collect()
+
+
 def _song_row(song: Song, cover: str, index: int) -> str:
     return (
         f'<article class="song-row"><span class="index">{index}</span>'
@@ -72,11 +128,10 @@ async def render_card(
     title: str,
     hint: str,
     proxy: str = "",
+    renderer_manager: RendererManager | None = None,
 ) -> bytes:
     """下载封面并用固定模板输出 PNG 字节。"""
 
-    if html_to_pic is None:
-        raise RuntimeError("未安装 pytakumi，请安装 requirements.txt")
     async with httpx.AsyncClient(
         timeout=8,
         follow_redirects=True,
@@ -94,12 +149,5 @@ async def render_card(
     html = html.replace("{{HINT}}", escape(hint))
     html = html.replace("{{ROWS}}", rows)
     html = html.replace("{{HERO_COVER}}", covers[0] if covers else PLACEHOLDER)
-    fonts = [{"data": FONT.read_bytes(), "name": FONT_NAME}] if FONT.is_file() else None
-    return await asyncio.to_thread(
-        html_to_pic,
-        html,
-        width=680,
-        fonts=fonts,
-        font_families=[FONT_NAME],
-        lang="zh",
-    )
+    manager = renderer_manager or RendererManager()
+    return await manager.render(html)
