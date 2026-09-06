@@ -1,0 +1,9 @@
+name: astrbot_plugin_momotune
+display_name: MomoTune 网易云点歌
+desc: 基于 MomoTune 的 AstrBot 网易云音乐点歌插件，支持候选卡片、数字选歌、歌曲 ID 直达和 MetingAPI。
+version: v0.2.0
+author: 1042612161
+repo: https://github.com/1042612161/astrbot_plugin_momotune
+astrbot_version: ">=4.16,<5"
+support_platforms:
+  - aiocqhttp

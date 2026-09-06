@@ -1,0 +1,46 @@
+{
+  "ncm_api_base": {
+    "type": "string",
+    "title": "网易云 API 地址",
+    "description": "选择网易云兼容 API；MetingAPI 使用 type/search、type/url、type/pic 参数。",
+    "default": "https://api.ames.cc.cd",
+    "options": ["https://api.ames.cc.cd", "https://api.qijieya.cn/meting/"]
+  },
+  "ncm_search_limit": {
+    "type": "int",
+    "title": "搜索结果数量",
+    "description": "每次最多展示的曲目数量（1-30）。",
+    "default": 10,
+    "minimum": 1,
+    "maximum": 30
+  },
+  "selection_ttl_seconds": {
+    "type": "int",
+    "title": "候选有效期（秒）",
+    "description": "搜索候选等待数字选择的有效时间，范围 30-300 秒。",
+    "default": 60,
+    "minimum": 30,
+    "maximum": 300,
+    "slider": {"min": 30, "max": 300, "step": 10}
+  },
+  "ncm_quality": {
+    "type": "string",
+    "title": "音质等级",
+    "description": "MomoTune API 使用网易云 level；MetingAPI 映射为 br。",
+    "default": "exhigh",
+    "options": ["standard", "higher", "exhigh", "lossless", "hires", "jyeffect", "sky", "jymaster"]
+  },
+  "ncm_cookie": {
+    "type": "string",
+    "title": "网易云 Cookie",
+    "description": "可选的网易云 Cookie，仅发送给你配置的 API。",
+    "default": "",
+    "secret": true
+  },
+  "proxy": {
+    "type": "string",
+    "title": "HTTP 代理",
+    "description": "用于 API 搜索、详情、封面和音频下载，例如 http://127.0.0.1:7890；留空直连。",
+    "default": ""
+  }
+}
