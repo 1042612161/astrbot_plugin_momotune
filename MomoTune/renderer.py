@@ -39,7 +39,7 @@ def _placeholder_data_uri() -> str:
 
 def _duration(value: int | None) -> str:
     if value is None or value < 0:
-        return "--:--"
+        return ""
     seconds = value // 1000
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
@@ -131,8 +131,7 @@ def _song_row(song: Song, cover: str, index: int) -> str:
         f'<div class="song-artist">{escape(song.artist)}</div>'
         f'<div class="song-album">{escape(song.album or "单曲")}</div>'
         "</div>"
-        # f'<span class="duration">{_duration(song.duration_ms)}</span>'
-        f'<span class="duration"></span>'
+        f'<span class="duration">{_duration(song.duration_ms)}</span>'
         '<span class="source">网易云音乐</span></article>'
     )
 
