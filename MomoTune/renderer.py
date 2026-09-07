@@ -132,6 +132,7 @@ def _song_row(song: Song, cover: str, index: int) -> str:
         f'<div class="song-album">{escape(song.album or "单曲")}</div>'
         "</div>"
         # f'<span class="duration">{_duration(song.duration_ms)}</span>'
+        f'<span class="duration"></span>'
         '<span class="source">网易云音乐</span></article>'
     )
 
