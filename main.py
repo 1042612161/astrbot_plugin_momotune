@@ -18,6 +18,7 @@ from .MomoTune import (
     SourceError,
     render_card,
 )
+from .MomoTune.config import load_renderer_config
 
 COMMAND_PATTERN = re.compile(r"^/?(?:点歌|唱歌|来一首)\s*")
 
@@ -33,7 +34,7 @@ class MomoTunePlugin(Star):
         super().__init__(context)
         self.config = config if config is not None else {}
         self.selections = SelectionStore(ttl_seconds=self._selection_ttl_seconds())
-        self.renderer = RendererManager()
+        self.renderer = RendererManager(load_renderer_config(self.config))
 
     async def initialize(self) -> None:
         self.renderer.initialize()
@@ -42,35 +43,26 @@ class MomoTunePlugin(Star):
         await self.renderer.close()
         await super().terminate()
 
-    def _config(self, key: str, default: object) -> object:
-        value = self.config.get(key, default)
-        return value if value not in (None, "") else default
+    def _config(self, key: str) -> object:
+        return self.config.get(key)
 
     def _proxy(self) -> str:
-        return str(self._config("proxy", ""))
+        value = self._config("proxy")
+        return str(value) if value not in (None, "") else ""
 
     def _source(self) -> NcmClient:
         return NcmClient(
-            base=str(self._config("ncm_api_base", "https://api.ames.cc.cd")),
-            cookie=str(self._config("ncm_cookie", "")),
-            quality=str(self._config("ncm_quality", "exhigh")),
+            base=str(self._config("ncm_api_base")),
+            cookie=str(self._config("ncm_cookie") or ""),
+            quality=str(self._config("ncm_quality")),
             proxy=self._proxy(),
         )
 
     def _search_limit(self) -> int:
-        try:
-            return max(1, min(30, int(self._config("ncm_search_limit", 10))))
-        except (TypeError, ValueError):
-            return 10
+        return self.config.get("ncm_search_limit")
 
     def _selection_ttl_seconds(self) -> int:
-        try:
-            return max(
-                30,
-                min(300, int(self._config("selection_ttl_seconds", 60))),
-            )
-        except (TypeError, ValueError):
-            return 60
+        return self.config.get("selection_ttl_seconds")
 
     def _sync_selection_ttl(self) -> int:
         """应用最新配置，使 WebUI 修改后的值无需改动业务代码。"""
@@ -130,8 +122,8 @@ class MomoTunePlugin(Star):
                 [song],
                 "正在播放",
                 "网易云 · MomoTune 为你选中的旋律",
-                self._proxy(),
                 self.renderer,
+                self._proxy(),
             )
             await event.send(event.chain_result([Image.fromBytes(card)]))
         except (OSError, RuntimeError, httpx.HTTPError) as exc:
@@ -207,8 +199,8 @@ class MomoTunePlugin(Star):
                 songs,
                 "网易云点歌候选",
                 f"回复数字 1～{len(songs)} 播放对应曲目 · 选择在 {ttl_seconds} 秒内有效",
-                self._proxy(),
                 self.renderer,
+                self._proxy(),
             )
         except (OSError, RuntimeError, httpx.HTTPError) as exc:
             logger.warning(f"[MomoTune] 渲染搜索结果失败: {exc}")

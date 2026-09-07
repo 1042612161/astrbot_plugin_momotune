@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from .config import RendererConfig
 from .models import Song
 
 try:
@@ -20,10 +21,7 @@ except ImportError:  # pragma: no cover - AstrBot 按 requirements.txt 安装依
     html_to_pic = None
 
 ASSETS = Path(__file__).resolve().parent / "assets"
-TEMPLATE = ASSETS / "templates" / "search_list.html"
-FONT = ASSETS / "fonts" / "LXGWWenKai-Regular.ttf"
 FONT_NAME = "MomoTuneWenKai"
-MAX_COVER_BYTES = 2 * 1024 * 1024
 PLACEHOLDER = (
     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
     "width='160' height='160'%3E%3Crect width='100%25' height='100%25' "
@@ -40,14 +38,18 @@ def _duration(value: int | None) -> str:
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
-async def _cover_data_uri(client: httpx.AsyncClient, url: str | None) -> str:
+async def _cover_data_uri(
+    client: httpx.AsyncClient,
+    url: str | None,
+    max_cover_bytes: int,
+) -> str:
     if not url or not url.startswith(("http://", "https://")):
         return PLACEHOLDER
     try:
         response = await client.get(url)
     except httpx.HTTPError:
         return PLACEHOLDER
-    if response.status_code >= 400 or len(response.content) > MAX_COVER_BYTES:
+    if response.status_code >= 400 or len(response.content) > max_cover_bytes:
         return PLACEHOLDER
     content_type = response.headers.get("content-type", "image/jpeg").split(";", 1)[0]
     if not content_type.startswith("image/"):
@@ -59,10 +61,13 @@ async def _cover_data_uri(client: httpx.AsyncClient, url: str | None) -> str:
 class RendererManager:
     """管理插件级 pytakumi Renderer，并串行化原生渲染调用。"""
 
-    def __init__(self) -> None:
+    def __init__(self, config: RendererConfig) -> None:
         self._renderer = None
         self._lock = asyncio.Lock()
         self._closed = False
+        self.template_path = ASSETS / "templates" / config.template_filename
+        self.font_path = ASSETS / "fonts" / config.font_filename
+        self.max_cover_bytes = config.max_cover_bytes
 
     def initialize(self) -> None:
         """创建 Renderer 并只注册一次插件字体。"""
@@ -74,8 +79,10 @@ class RendererManager:
         if Renderer is None or html_to_pic is None:
             raise RuntimeError("未安装 pytakumi，请安装 requirements.txt")
         self._renderer = Renderer()
-        if FONT.is_file():
-            self._renderer.register_font(FONT.read_bytes(), name=FONT_NAME)
+        if self.font_path.is_file():
+            self._renderer.register_font(
+                self.font_path.read_bytes(), name=FONT_NAME
+            )
 
     async def render(self, html: str) -> bytes:
         """使用同一个 Renderer 输出 PNG，避免并发访问原生对象。"""
@@ -127,27 +134,35 @@ async def render_card(
     songs: list[Song],
     title: str,
     hint: str,
+    renderer_manager: RendererManager,
     proxy: str = "",
-    renderer_manager: RendererManager | None = None,
 ) -> bytes:
     """下载封面并用固定模板输出 PNG 字节。"""
 
+    if not renderer_manager.template_path.is_file():
+        raise RuntimeError(
+            f"卡片模板不存在：{renderer_manager.template_path.name}"
+        )
     async with httpx.AsyncClient(
         timeout=8,
         follow_redirects=True,
         proxy=proxy.strip() or None,
     ) as client:
         covers = await asyncio.gather(
-            *(_cover_data_uri(client, song.pic_url) for song in songs)
+            *(
+                _cover_data_uri(
+                    client, song.pic_url, renderer_manager.max_cover_bytes
+                )
+                for song in songs
+            )
         )
     rows = "".join(
         _song_row(song, cover, index)
         for index, (song, cover) in enumerate(zip(songs, covers), 1)
     )
-    html = TEMPLATE.read_text(encoding="utf-8")
+    html = renderer_manager.template_path.read_text(encoding="utf-8")
     html = html.replace("{{TITLE}}", escape(title))
     html = html.replace("{{HINT}}", escape(hint))
     html = html.replace("{{ROWS}}", rows)
     html = html.replace("{{HERO_COVER}}", covers[0] if covers else PLACEHOLDER)
-    manager = renderer_manager or RendererManager()
-    return await manager.render(html)
+    return await renderer_manager.render(html)

@@ -42,5 +42,23 @@
     "description": "HTTP 代理",
     "hint": "用于 API 搜索、详情、封面和音频下载，例如 http://127.0.0.1:7890；留空直连。",
     "default": ""
+  },
+  "max_cover_size": {
+    "type": "int",
+    "description": "歌曲图片最大尺寸",
+    "hint": "单位为M，默认2M。",
+    "default": 2
+  },
+  "template_filename": {
+    "type": "string",
+    "description": "卡片渲染模板",
+    "hint": "卡片渲染模板文件名。",
+    "default": "search_list.html"
+  },
+  "font_filename": {
+    "type": "string",
+    "description": "字体文件",
+    "hint": "字体文件名。",
+    "default": "LXGWWenKai-Regular.ttf"
   }
 }
