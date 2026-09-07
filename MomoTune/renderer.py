@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import gc
+from functools import lru_cache
 from html import escape
 import inspect
 from pathlib import Path
@@ -22,13 +23,18 @@ except ImportError:  # pragma: no cover - AstrBot 按 requirements.txt 安装依
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 FONT_NAME = "MomoTuneWenKai"
-PLACEHOLDER = (
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-    "width='160' height='160'%3E%3Crect width='100%25' height='100%25' "
-    "rx='24' fill='%23ffd6e7'/%3E%3Ctext x='50%25' y='58%25' "
-    "text-anchor='middle' font-size='64' fill='%23ff6b9a'%3E♪%3C/text%3E"
-    "%3C/svg%3E"
-)
+PLACEHOLDER_PATH = ASSETS / "img" / "placeholder.jpg"
+
+
+@lru_cache(maxsize=1)
+def _placeholder_data_uri() -> str:
+    """读取插件静态占位图，并缓存为 JPEG Data URI。"""
+
+    try:
+        encoded = base64.b64encode(PLACEHOLDER_PATH.read_bytes()).decode("ascii")
+    except OSError as exc:
+        raise RuntimeError(f"占位图不存在或无法读取：{PLACEHOLDER_PATH}") from exc
+    return f"data:image/jpeg;base64,{encoded}"
 
 
 def _duration(value: int | None) -> str:
@@ -44,13 +50,13 @@ async def _cover_data_uri(
     max_cover_bytes: int,
 ) -> str:
     if not url or not url.startswith(("http://", "https://")):
-        return PLACEHOLDER
+        return _placeholder_data_uri()
     try:
         response = await client.get(url)
     except httpx.HTTPError:
-        return PLACEHOLDER
+        return _placeholder_data_uri()
     if response.status_code >= 400 or len(response.content) > max_cover_bytes:
-        return PLACEHOLDER
+        return _placeholder_data_uri()
     content_type = response.headers.get("content-type", "image/jpeg").split(";", 1)[0]
     if not content_type.startswith("image/"):
         content_type = "image/jpeg"
@@ -125,8 +131,8 @@ def _song_row(song: Song, cover: str, index: int) -> str:
         f'<div class="song-artist">{escape(song.artist)}</div>'
         f'<div class="song-album">{escape(song.album or "单曲")}</div>'
         "</div>"
-        f'<span class="duration">{_duration(song.duration_ms)}</span>'
-        '<span class="source">NCM</span></article>'
+        # f'<span class="duration">{_duration(song.duration_ms)}</span>'
+        '<span class="source">网易云音乐</span></article>'
     )
 
 
@@ -164,5 +170,8 @@ async def render_card(
     html = html.replace("{{TITLE}}", escape(title))
     html = html.replace("{{HINT}}", escape(hint))
     html = html.replace("{{ROWS}}", rows)
-    html = html.replace("{{HERO_COVER}}", covers[0] if covers else PLACEHOLDER)
+    html = html.replace(
+        "{{HERO_COVER}}",
+        covers[0] if covers else _placeholder_data_uri(),
+    )
     return await renderer_manager.render(html)
