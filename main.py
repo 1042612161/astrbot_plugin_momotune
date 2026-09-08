@@ -106,7 +106,7 @@ class MomoTunePlugin(Star):
         if not play_url:
             await event.send(
                 event.plain_result(
-                    "这首歌暂时没有可用的播放链接（可能受版权限制），换一首试试吧。"
+                    "这首歌暂时没有可用的播放链接，换一首试试吧"
                 )
             )
             return
@@ -133,7 +133,8 @@ class MomoTunePlugin(Star):
             await self._send_audio_url(event, play_url)
         except Exception as exc:
             logger.warning(f"[MomoTune] 音频发送失败 {song.song_id}: {exc}")
-            await event.send(event.plain_result("音频发送失败，请稍后再试。"))
+            await event.send(event.plain_result("发送连接又断了，很好，机器也学会摆烂了"))
+        event.stop_event()
 
     @staticmethod
     async def _send_audio_url(event: AstrMessageEvent, url: str) -> None:
@@ -174,7 +175,7 @@ class MomoTunePlugin(Star):
 
         keyword = COMMAND_PATTERN.sub("", event.message_str.strip(), count=1).strip()
         if not keyword:
-            yield event.plain_result("请输入歌名，例如：点歌 晴天")
+            yield event.plain_result("输个歌名呀倒是，比如：点歌 玄翎谣")
             return
         key = self._selection_key(event)
         ttl_seconds = self._sync_selection_ttl()
@@ -185,10 +186,10 @@ class MomoTunePlugin(Star):
         try:
             songs = await self._search(keyword)
         except (SourceError, httpx.HTTPError) as exc:
-            yield event.plain_result(f"搜索网易云「{keyword}」失败：{exc}")
+            yield event.plain_result(f"终端检索完网易云「{keyword}」抽风了：{exc}")
             return
         if not songs:
-            yield event.plain_result(f"网易云没有找到「{keyword}」相关的歌曲。")
+            yield event.plain_result(f"终端里没找到「{keyword}」相关的歌曲啦")
             return
         if len(songs) == 1:
             self.selections.clear(key)
@@ -198,18 +199,18 @@ class MomoTunePlugin(Star):
             card = await render_card(
                 songs,
                 "网易云点歌候选",
-                f"回复数字 1～{len(songs)} 播放对应曲目 · 选择在 {ttl_seconds} 秒内有效",
+                f"想听哪首，回个1到{len(songs)}呗，过期本小姐不候哦",
                 self.renderer,
                 self._proxy(),
             )
         except (OSError, RuntimeError, httpx.HTTPError) as exc:
             logger.warning(f"[MomoTune] 渲染搜索结果失败: {exc}")
-            yield event.plain_result("渲染搜索结果失败，请稍后再试。")
+            yield event.plain_result("啧，这破终端渲染怎么这么不靠谱，关键时候掉链子")
             return
         self.selections.set(key, songs)
         yield event.chain_result([Image.fromBytes(card)])
         yield event.plain_result(
-            f"回复数字 1～{len(songs)} 播放对应曲目（{ttl_seconds} 秒内有效）"
+            f"想听哪首，回个1到{len(songs)}呗，过期本小姐不候哦"
         )
 
     @filter.regex(r"^\d{1,2}$")
@@ -223,7 +224,7 @@ class MomoTunePlugin(Star):
             return
         choice = int(event.message_str.strip())
         if not 1 <= choice <= len(songs):
-            yield event.plain_result(f"请回复 1～{len(songs)} 之间的数字。")
+            yield event.plain_result(f"啧，你倒是回复个终端里有的序号呀")
             return
         self.selections.clear(key)
         await self._play(event, songs[choice - 1])
@@ -248,19 +249,18 @@ class MomoTunePlugin(Star):
             else song_name.strip()
         )
         if not query:
-            yield event.plain_result("未指定歌名。")
+            yield event.plain_result("你倒是说歌名呀")
             return
         if query.isdigit():
             await self._play(event, Song(query))
-            yield event.plain_result(f"已尝试播放网易云歌曲 ID {query}。")
             return
         try:
             songs = await self._search(query)
         except (SourceError, httpx.HTTPError) as exc:
-            yield event.plain_result(f"搜索失败：{exc}")
+            yield event.plain_result(f"唔，终端检索出问题了：{exc}")
             return
         if not songs:
-            yield event.plain_result(f"未找到「{query}」相关歌曲。")
+            yield event.plain_result(f"终端里没找到「{query}」相关歌曲啦")
             return
         selected = songs[0]
         if artist.strip():
