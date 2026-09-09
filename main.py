@@ -198,7 +198,7 @@ class MomoTunePlugin(Star):
         try:
             card = await render_card(
                 songs,
-                "网易云点歌候选",
+                f"{keyword}",
                 f"想听哪首，回个1到{len(songs)}呗，过期本小姐不候哦",
                 self.renderer,
                 self._proxy(),
